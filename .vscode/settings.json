@@ -1,5 +1,10 @@
 {
+    "python.pythonPath": "virt/Scripts/python.exe",
     "python.linting.pycodestyleEnabled": true,
     "python.linting.enabled": true,
     "python.linting.pycodestyleArgs": ["--max-line-length=120"],
+    "files.insertFinalNewline": true,
+    "files.trimFinalNewlines": true,
+    "files.trimTrailingWhitespace": true,
+    "editor.wordWrap": "on",
 }
