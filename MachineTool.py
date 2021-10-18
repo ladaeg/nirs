@@ -9,8 +9,12 @@ distance_to_wall = 1000
 distance_bw_mt = 700
 robot_hand_length = 1500
 
+work_time_hours = 8
+work_time_sec = work_time_hours*60*60
+work_time_fact = 0
 
-def arifm_round(num):
+
+def arifm_round(num) -> float:
     num = int(num + (0.5 if num > 0 else -0.5))
     return num
 
@@ -20,7 +24,8 @@ class StopPoint():
         cur_cos = arifm_round(cos(tool.orientation))
         cur_sin = arifm_round(sin(tool.orientation))
         if (cur_cos+cur_sin) == 1 or (cur_cos+cur_sin) == -1:
-            self.x = tool.x_сentre + cur_cos*(tool.length/2 + robot_hand_length)
+            self.x = tool.x_сentre + cur_cos * \
+                (tool.length/2 + robot_hand_length)
             self.y = tool.y_centre - cur_sin*(tool.width/2 + robot_hand_length)
         else:
             print('Ошибка в задании положения станка!')
@@ -47,51 +52,148 @@ class Conveyor(BaseTool):
 
 class MachineTool(BaseTool):
     mt_list = []
+    mt_order = []
 
-    def __init__(self, x, y,  width=mt_width, length=mt_length, orientation=3*pi/2) -> None:
+    def __init__(self, x, y, width=mt_width, length=mt_length, orientation=(-pi/2)) -> None:
         super().__init__(x, y,  width, length, orientation)
         self.mt_list.append(self)
+        self.details_list = []
+        self.process_time_left = 0
+        self.cur_detail_num = 0
+
+    def add_detail(self, process_time, amount):
+        detail = Detail(process_time, amount)
+        self.details_list.append(detail)
+
+    def start_process(self):
+        try:
+            cur_detail = self.details_list[self.cur_detail_num]
+            cur_detail.fact_amount += 1
+            self.process_time_left = cur_detail.process_time
+
+            if cur_detail.fact_amount == cur_detail.amount:
+                self.cur_detail_num += 1
+                self.details_list[self.cur_detail_num]
+
+        except IndexError:
+            print('Нет деталей в списке!')
+            self.mt_order.pop()
+
+    @classmethod
+    def update_order(cls, time=0):
+        for tool in cls.mt_order:
+            if time <= tool.process_time_left:
+                tool.process_time_left -= time
+            else:
+                tool.process_time_left = 0
+
+        cls.mt_order.sort(key=lambda tool: tool.process_time_left)
 
 
-class LoaderRobot:
-    def __init__(self, speed=12) -> None:
+class Detail:
+    def __init__(self, process_time, amount, fact_amount=0) -> None:
+        self.process_time = process_time
+        self.amount = amount
+        self.fact_amount = fact_amount
+
+
+class Robot:
+
+    def __init__(self, speed=12, load_time=5) -> None:
         # скорость в метрах в минуту первожу в миллиметры в секунду
         self.speed = speed*1000 / 60
+        self.load_time = load_time
+        self.work_time = work_time_sec
+        self.conv = Conveyor.conv_list[0]
+        self.cur_tool = self.conv
+        self.set_all_pathes()
 
+    def download(self, cur_tool: 'MachineTool'):
+        self.go_to(self.conv)
+        self.add_load_time()
+        self.go_to(cur_tool)
 
-class RobotPath:
-    all_pathes = {}
+        global work_time_fact
+        self.work_time -= cur_tool.process_time_left
+        work_time_fact += cur_tool.process_time_left
+        MachineTool.update_order(cur_tool.process_time_left)
+        self.add_load_time()
+        self.add_load_time()
 
-    def __init__(self) -> None:
+    def add_load_time(self):
+        global work_time_fact
+
+        work_time_fact += self.load_time
+        MachineTool.update_order(self.load_time)
+
+    def go_to(self, tool):
+        global work_time_fact
+
+        path_time = self.all_pathes_time.get(self.cur_tool)
+        work_time_fact += path_time
+        MachineTool.update_order(path_time)
+        self.cur_tool = tool
+
+    def set_all_pathes(self):
         if len(Conveyor.conv_list) == 1:
-            self.conveyor = Conveyor.conv_list[0]
             for tool in MachineTool.mt_list:
-                if self.conveyor.stop_point.x != tool.stop_point.x:
+                if self.conv.stop_point.x != tool.stop_point.x:
                     break
             else:
-                self.calculate_distance(Conveyor.conv_list, MachineTool.mt_list)
+                self.calculate_path_time()
 
             for tool in MachineTool.mt_list:
-                if self.conveyor.stop_point.y != tool.stop_point.y:
-                    print('Станки должны находиться на одной горизонтальной или вертикальной линии с конвеером!')
+                if self.conv.stop_point.y != tool.stop_point.y:
+                    print(
+                        'Станки должны находиться на одной горизонтальной или вертикальной линии с конвеером!')
                     break
             else:
-                self.calculate_distance(Conveyor.conv_list, MachineTool.mt_list)
+                self.calculate_path_time()
         else:
             print('Ожидается один конвеер!')
 
-    def calculate_distance(self, conveyors, machine_tools):
+    def calculate_path_time(self) -> None:
+        self.all_pathes_time = {}
+        self.all_pathes_time.update({self.conv: 0})
+
         for tool in MachineTool.mt_list:
-            path = (self.conveyor.stop_point.x-tool.stop_point.x) + (self.conveyor.stop_point.y-tool.stop_point.y)
-            self.all_pathes.update({tool: abs(path)})
+            path = abs(self.conv.stop_point.x-tool.stop_point.x) + \
+                (self.conv.stop_point.y-tool.stop_point.y)
+            time_path = arifm_round(path/self.speed)
+            self.all_pathes_time.update({tool: time_path})
 
 
-conveyor_1 = Conveyor(distance_to_wall + conv_length/2, distance_to_wall + mt_width + robot_hand_length)
-machine_tool_1 = MachineTool(conveyor_1.x_сentre + conv_length/2 + robot_hand_length + mt_length/2,
-                             distance_to_wall + mt_width/2)
-machine_tool_2 = MachineTool(machine_tool_1.x_сentre + mt_length + distance_bw_mt, distance_to_wall + mt_width/2)
-machine_tool_3 = MachineTool(machine_tool_2.x_сentre + mt_length + distance_bw_mt, distance_to_wall + mt_width/2)
-machine_tool_4 = MachineTool(machine_tool_3.x_сentre + mt_length + distance_bw_mt, distance_to_wall + mt_width/2)
-print(machine_tool_1.stop_point.y)
-print(LoaderRobot().speed)
-print(RobotPath().all_pathes.items())
+if __name__ == '__main__':
+    conveyor_1 = Conveyor(distance_to_wall + conv_length/2,
+                          distance_to_wall + mt_width + robot_hand_length)
+
+    machine_tool_1 = MachineTool(conveyor_1.x_сentre + conv_length/2 + robot_hand_length + mt_length/2,
+                                 distance_to_wall + mt_width/2)
+    machine_tool_1.add_detail(250*2, 50)
+    machine_tool_1.add_detail(100*2, 15)
+
+    machine_tool_2 = MachineTool(machine_tool_1.x_сentre + mt_length + distance_bw_mt,
+                                 distance_to_wall + mt_width/2)
+    machine_tool_2.add_detail(300*2, 10)
+    machine_tool_2.add_detail(100*2, 25)
+
+    machine_tool_3 = MachineTool(machine_tool_2.x_сentre + mt_length + distance_bw_mt,
+                                 distance_to_wall + mt_width/2)
+    machine_tool_3.add_detail(550*2, 5)
+
+    machine_tool_4 = MachineTool(machine_tool_3.x_сentre + mt_length + distance_bw_mt,
+                                 distance_to_wall + mt_width/2)
+    machine_tool_4.add_detail(100*2, 100)
+
+    robot = Robot()
+
+    MachineTool.mt_order = MachineTool.mt_list
+    while work_time_fact < work_time_sec:
+        try:
+            cur_tool = MachineTool.mt_order[0]
+            robot.download(cur_tool)
+            cur_tool.start_process()
+            MachineTool.update_order()
+        except IndexError:
+            print(f'Очередь на загрузку пуста - рабочий день окончен! - {work_time_fact}')
+            break
