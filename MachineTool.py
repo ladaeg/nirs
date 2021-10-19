@@ -58,6 +58,7 @@ class MachineTool(BaseTool):
         super().__init__(x, y,  width, length, orientation)
         self.mt_list.append(self)
         self.details_list = []
+        self.unload_flag = False
         self.process_time_left = 0
         self.cur_detail_num = 0
 
@@ -70,14 +71,17 @@ class MachineTool(BaseTool):
             cur_detail = self.details_list[self.cur_detail_num]
             cur_detail.fact_amount += 1
             self.process_time_left = cur_detail.process_time
-
+            MachineTool.update_order()
             if cur_detail.fact_amount == cur_detail.amount:
                 self.cur_detail_num += 1
                 self.details_list[self.cur_detail_num]
 
         except IndexError:
-            print('Нет деталей в списке!')
-            self.mt_order.pop()
+            print(f'Нет деталей в списке! - {self} {self.unload_flag}')
+            if self.unload_flag:
+                self.mt_order.remove(self)
+            else:
+                self.unload_flag = True
 
     @classmethod
     def update_order(cls, time=0):
@@ -87,14 +91,18 @@ class MachineTool(BaseTool):
             else:
                 tool.process_time_left = 0
 
+            global work_time_sec, work_time_fact
+            if work_time_sec-work_time_fact < tool.process_time_left:
+                cls.mt_order.remove(tool)
+
         cls.mt_order.sort(key=lambda tool: tool.process_time_left)
 
 
 class Detail:
-    def __init__(self, process_time, amount, fact_amount=0) -> None:
+    def __init__(self, process_time, amount) -> None:
         self.process_time = process_time
         self.amount = amount
-        self.fact_amount = fact_amount
+        self.fact_amount = 0
 
 
 class Robot:
@@ -108,17 +116,32 @@ class Robot:
         self.cur_tool = self.conv
         self.set_all_pathes()
 
-    def download(self, cur_tool: 'MachineTool'):
-        self.go_to(self.conv)
-        self.add_load_time()
+    def unload(self, cur_tool):
         self.go_to(cur_tool)
-
         global work_time_fact
         self.work_time -= cur_tool.process_time_left
         work_time_fact += cur_tool.process_time_left
-        MachineTool.update_order(cur_tool.process_time_left)
         self.add_load_time()
+        self.go_to(self.conv)
         self.add_load_time()
+
+    def download(self, cur_tool: 'MachineTool'):
+        if not cur_tool.unload_flag:
+            self.go_to(self.conv)   # идет к конвееру
+            self.add_load_time()    # кладет деталь
+            self.add_load_time()    # берет заготовку
+            self.go_to(cur_tool)    # идет к станку
+
+            # ждет пока текущий станок закончит обработку
+            global work_time_fact
+            self.work_time -= cur_tool.process_time_left
+            work_time_fact += cur_tool.process_time_left
+            MachineTool.update_order(cur_tool.process_time_left)
+
+            self.add_load_time()    # снимает деталь
+            self.add_load_time()    # устанавливает заготовку
+        else:
+            self.unload(cur_tool)
 
     def add_load_time(self):
         global work_time_fact
@@ -144,8 +167,7 @@ class Robot:
 
             for tool in MachineTool.mt_list:
                 if self.conv.stop_point.y != tool.stop_point.y:
-                    print(
-                        'Станки должны находиться на одной горизонтальной или вертикальной линии с конвеером!')
+                    print('Станки должны находиться на одной горизонтальной или вертикальной линии с конвеером!')
                     break
             else:
                 self.calculate_path_time()
@@ -169,31 +191,35 @@ if __name__ == '__main__':
 
     machine_tool_1 = MachineTool(conveyor_1.x_сentre + conv_length/2 + robot_hand_length + mt_length/2,
                                  distance_to_wall + mt_width/2)
-    machine_tool_1.add_detail(250*2, 50)
-    machine_tool_1.add_detail(100*2, 15)
+    machine_tool_1.add_detail(500, 50)
+    machine_tool_1.add_detail(200, 15)
 
     machine_tool_2 = MachineTool(machine_tool_1.x_сentre + mt_length + distance_bw_mt,
                                  distance_to_wall + mt_width/2)
-    machine_tool_2.add_detail(300*2, 10)
-    machine_tool_2.add_detail(100*2, 25)
+    machine_tool_2.add_detail(600, 50)
+    machine_tool_2.add_detail(200, 25)
 
     machine_tool_3 = MachineTool(machine_tool_2.x_сentre + mt_length + distance_bw_mt,
                                  distance_to_wall + mt_width/2)
-    machine_tool_3.add_detail(550*2, 5)
+    machine_tool_3.add_detail(1100, 50)
 
     machine_tool_4 = MachineTool(machine_tool_3.x_сentre + mt_length + distance_bw_mt,
                                  distance_to_wall + mt_width/2)
-    machine_tool_4.add_detail(100*2, 100)
+    machine_tool_4.add_detail(200, 10)
 
     robot = Robot()
 
-    MachineTool.mt_order = MachineTool.mt_list
+    MachineTool.mt_order = MachineTool.mt_list[:]
+
     while work_time_fact < work_time_sec:
         try:
             cur_tool = MachineTool.mt_order[0]
             robot.download(cur_tool)
             cur_tool.start_process()
-            MachineTool.update_order()
         except IndexError:
-            print(f'Очередь на загрузку пуста - рабочий день окончен! - {work_time_fact}')
             break
+
+    print(f'Очередь на загрузку пуста - рабочий день окончен! - {work_time_fact} {robot.work_time} {work_time_sec}')
+    for tool in MachineTool.mt_list:
+        for detail in tool.details_list:
+            print(f'{tool} - {detail.fact_amount}')
