@@ -89,10 +89,10 @@ class MachineTool(BaseTool):
             if cur_detail.process_time < work_time_sec-work_time_fact:
                 cur_detail.fact_amount += 1     # установить, что обработана еще одна деталь текущего вида
                 self.process_time_left = cur_detail.process_time
+                # обновить очередь станков на обслуживание -> текущий станок сдвинется на другое место
+                MachineTool.update_order()
             else:   # если время обработки детали на станке больше остатка рабочего времени, ставим сатнок на разгрузку
                 self.unload_flag = True
-            # обновить очередь станков на обслуживание -> текущий станок сдвинется на другое место
-            MachineTool.update_order()
             # если все детали текущего вида обработаны, переходим к следующей в списке
             if cur_detail.fact_amount == cur_detail.amount:
                 self.cur_detail_num += 1
@@ -100,10 +100,7 @@ class MachineTool(BaseTool):
 
         except IndexError:
             print(f'Нет деталей в списке! - {self.name}, разгрузка произведена: {self.unload_flag}')
-            if self.unload_flag:    # если робот разгрузил станок, то удаляем его из очереди
-                self.mt_order.remove(self)
-            else:   # если нет, то станок остается в очереди, но с флагом на разгрузку True
-                self.unload_flag = True
+            self.unload_flag = True
 
     @classmethod
     def update_order(cls, time=0):
@@ -140,11 +137,20 @@ class Robot:
 
     def unload(self, cur_tool):
         """Разгрузить станок"""
+        global work_time_fact
+        print(f'Разгрузка {cur_tool.name} началась {work_time_fact}')
         self.go_to(cur_tool)    # идет к станку
+        print(f'Разгрузка {cur_tool.name} подошли в {work_time_fact}')
         self.wait()             # ждет пока текущий станок закончит обработку
+        print(f'Разгрузка {cur_tool.name} подождали до {work_time_fact}')
         self.add_load_time()    # снимает деталь
+        print(f'Разгрузка {cur_tool.name} сняли деталь в {work_time_fact}')
         self.go_to(self.conv)   # идет к конвееру
+        print(f'Разгрузка {cur_tool.name} конвеер в {work_time_fact}')
         self.add_load_time()    # кладет деталь
+        print(f'Разгрузка {cur_tool.name} положили {work_time_fact}')
+        MachineTool.mt_order.remove(cur_tool)
+        print(f'Разгрузка {cur_tool.name} завершилась {work_time_fact}')
 
     def download(self, cur_tool: 'MachineTool'):
         """Загрузить станок"""
@@ -217,6 +223,8 @@ class Robot:
             time_path = arifm_round(path/self.speed)
             self.all_pathes_time.update({tool: time_path})
 
+        print(self.all_pathes_time)
+
 
 class Statistics():
     """Статистика по работе оборудования"""
@@ -249,25 +257,39 @@ if __name__ == '__main__':
     machine_tool_2.add_detail(600, 50)
     machine_tool_2.add_detail(200, 25)
 
-    machine_tool_3 = MachineTool(machine_tool_2.x_сentre + mt_length + distance_bw_mt,
-                                 distance_to_wall + mt_width/2)
-    machine_tool_3.add_detail(1100, 50)
+    case = int(input('Выберете случай компановки: '))
+    if case == 1:
+        machine_tool_3 = MachineTool(machine_tool_2.x_сentre + mt_length + distance_bw_mt,
+                                     distance_to_wall + mt_width/2)
+        machine_tool_3.add_detail(1100, 50)
 
-    machine_tool_4 = MachineTool(machine_tool_3.x_сentre + mt_length + distance_bw_mt,
-                                 distance_to_wall + mt_width/2)
-    machine_tool_4.add_detail(200, 10)
+        machine_tool_4 = MachineTool(machine_tool_3.x_сentre + mt_length + distance_bw_mt,
+                                     distance_to_wall + mt_width/2)
+        machine_tool_4.add_detail(200, 10)
+    elif case == 2:
+        machine_tool_3 = MachineTool(machine_tool_1.x_сentre,
+                                     machine_tool_1.y_centre + mt_width + 2*robot_hand_length,
+                                     orientation=pi/2)
+        machine_tool_3.add_detail(1100, 50)
+
+        machine_tool_4 = MachineTool(machine_tool_2.x_сentre,
+                                     machine_tool_2.y_centre + mt_width + 2*robot_hand_length,
+                                     orientation=pi/2)
+        machine_tool_4.add_detail(200, 10)
 
     robot = Robot()
 
     MachineTool.mt_order = MachineTool.mt_list[:]
 
-    while work_time_fact < work_time_sec:
-        try:
-            cur_tool = MachineTool.mt_order[0]
-            robot.download(cur_tool)
-            cur_tool.start_process()
-        except IndexError:
-            break
+    while work_time_fact < work_time_sec and len(MachineTool.mt_order) != 0:
+        cur_tool = MachineTool.mt_order[0]
+        robot.download(cur_tool)
+        cur_tool.start_process()
+    else:
+        unload_order = MachineTool.mt_order[:]
+        for tool in unload_order:
+            robot.unload(tool)
+        robot.work_time = robot.work_time - (work_time_sec - work_time_fact)
 
     print(f'Очередь на загрузку пуста - рабочий день окончен! - {work_time_fact} {robot.work_time} {work_time_sec}')
     for tool in MachineTool.mt_list:
